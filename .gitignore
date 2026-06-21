@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Environment / secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Local object-storage shim output + SQLite dev DB
+storage/
+*.db
+*.sqlite3
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
