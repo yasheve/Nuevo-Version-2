@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import AssetType
 from ..ocr import run_ocr
-from ..security import require_role, get_current_actor
+from ..security import get_current_actor
 
 router = APIRouter()
 
