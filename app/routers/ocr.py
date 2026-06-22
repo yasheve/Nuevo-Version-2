@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import AssetType
 from ..ocr import run_ocr
-from ..security import require_role
+from ..security import require_role, get_current_actor
 
 router = APIRouter()
 
@@ -17,7 +17,7 @@ class OCRIn(BaseModel):
 
 
 @router.post("/ocr")
-def ocr(body: OCRIn, db: Session = Depends(get_db), _=Depends(require_role("installer"))):
+def ocr(body: OCRIn, db: Session = Depends(get_db), _=Depends(get_current_actor)):
     at = db.query(AssetType).filter(AssetType.code == body.asset_type_code).first()
     ocr_fields = (at.ocr_fields if at else None) or []
     # Always 200, even on failure (contract §5).
