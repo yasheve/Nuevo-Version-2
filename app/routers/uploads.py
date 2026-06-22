@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..errors import err
-from ..security import require_role, get_current_actor, verify_file_token
+from ..security import get_current_actor, verify_file_token
 from ..storage import presign_put, write_bytes, read_bytes
 
 router = APIRouter()
