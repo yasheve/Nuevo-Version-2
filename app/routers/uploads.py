@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..errors import err
-from ..security import require_role, verify_file_token
+from ..security import require_role, get_current_actor, verify_file_token
 from ..storage import presign_put, write_bytes, read_bytes
 
 router = APIRouter()
@@ -17,7 +17,7 @@ class PresignIn(BaseModel):
 
 
 @router.post("/uploads/presign")
-def presign(body: PresignIn, _=Depends(require_role("installer"))):
+def presign(body: PresignIn, _=Depends(get_current_actor)):
     if body.kind not in _ALLOWED_KINDS:
         raise err(400, "validation", f"kind must be one of {sorted(_ALLOWED_KINDS)}")
     return presign_put(body.kind, body.content_type)
@@ -37,7 +37,7 @@ async def upload_local(token: str, request: Request):
 # Multipart fallback for clients that can't PUT to storage directly.
 @router.post("/uploads")
 async def upload_multipart(kind: str = "plate", file: UploadFile = File(...),
-                           _=Depends(require_role("installer"))):
+                           _=Depends(get_current_actor)):
     if kind not in _ALLOWED_KINDS:
         raise err(400, "validation", f"kind must be one of {sorted(_ALLOWED_KINDS)}")
     presigned = presign_put(kind, file.content_type or "application/octet-stream")
