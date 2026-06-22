@@ -34,7 +34,10 @@ ASSET_TYPES = [
     ("streetlight_controller", "Streetlight controller",
      ["imei", "serial_no", "manufacturer", "manufacture_year"]),
     ("streetlight_luminaire", "Streetlight luminaire",
-     ["serial_no", "manufacturer", "wattage", "manufacture_year"]),
+     # luminaire nameplate, then smart-controller label (imei = controller IMEI).
+     # Each photo is OCR'd separately; the model returns null for fields not in that image.
+     ["manufacturer", "model_no", "serial_no", "manufacture_year", "wattage",
+      "controller_manufacturer", "controller_model", "imei"]),
     ("mini_substation", "Mini substation",
      ["serial_no", "manufacturer", "manufacture_year"]),
     ("ring_main_unit", "Ring main unit",
@@ -53,15 +56,21 @@ def ensure_asset_types(db: Session) -> None:
 
     Runs on every boot (called from seed() before the one-time gate below), so it
     tops up any missing rows even after the database has already been seeded.
-    Existing rows are left untouched.
+    Existing rows are kept in sync with the canonical ASSET_TYPES list above
+    (ocr_fields and name), so changing a type's fields here propagates on deploy.
     """
-    existing = {a.code for a in db.query(AssetType).all()}
-    added = False
+    existing = {a.code: a for a in db.query(AssetType).all()}
+    changed = False
     for code, name, fields in ASSET_TYPES:
-        if code not in existing:
+        row = existing.get(code)
+        if row is None:
             db.add(AssetType(code=code, name=name, ocr_fields=fields))
-            added = True
-    if added:
+            changed = True
+        elif list(row.ocr_fields or []) != list(fields) or row.name != name:
+            row.ocr_fields = fields
+            row.name = name
+            changed = True
+    if changed:
         db.commit()
 
 

@@ -93,10 +93,16 @@ class Asset(Base):
 
     serial_no = Column(String, index=True)
     imei = Column(String, index=True)
-    manufacturer = Column(String)
-    manufacture_year = Column(Integer)
-    wattage = Column(Integer)
+    manufacturer = Column(String)            # luminaire manufacturer (nameplate OCR)
+    model_no = Column(String)                # luminaire model (nameplate OCR) [added: luminaire register]
+    manufacture_year = Column(Integer)       # luminaire year
+    wattage = Column(Integer)                # luminaire wattage
+    controller_manufacturer = Column(String) # smart controller manufacturer (controller OCR) [added]
+    controller_model = Column(String)        # smart controller model (controller OCR) [added]
+    # NOTE: the `imei` column above carries the CONTROLLER IMEI for luminaire captures.
     pole_no = Column(String)
+    work_order_no = Column(String)           # free-text WO-####### (replaces server picker) [added]
+    region = Column(String)                  # eThekwini operational region [added]
 
     lat = Column(Float)
     lng = Column(Float)

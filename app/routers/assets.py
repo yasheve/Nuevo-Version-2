@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
+import csv
+import io
 import re
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -43,11 +46,16 @@ class AssetIn(BaseModel):
     serial_no: str | None = None
     imei: str | None = None
     manufacturer: str | None = None
+    model_no: str | None = None
     manufacture_year: int | None = None
     wattage: int | None = None
+    controller_manufacturer: str | None = None
+    controller_model: str | None = None
     extracted: dict | None = None
     ocr_source: str | None = None
     pole_no: str | None = None
+    work_order_no: str | None = None
+    region: str | None = None
     location: LocationIn | None = None
     address: AddressIn | None = None
     notes: str | None = None
@@ -161,9 +169,14 @@ def _build_asset(db: Session, actor, body: AssetIn) -> Asset:
         serial_no=body.serial_no,
         imei=body.imei,
         manufacturer=body.manufacturer,
+        model_no=body.model_no,
         manufacture_year=body.manufacture_year,
         wattage=body.wattage,
+        controller_manufacturer=body.controller_manufacturer,
+        controller_model=body.controller_model,
         pole_no=body.pole_no,
+        work_order_no=body.work_order_no,
+        region=body.region,
         lat=loc.lat, lng=loc.lng, accuracy_m=loc.accuracy_m,
         road=addr.road, suburb=addr.suburb, city=addr.city,
         notes=body.notes,
@@ -373,3 +386,53 @@ def batch(body: BatchIn, db: Session = Depends(get_db), actor=Depends(get_curren
             results.append({"client_uuid": cu, "status": "error",
                             "error": {"code": getattr(e, "code", "validation"), "message": msg}})
     return {"results": results}
+
+
+# ---------------------------------------------------------------------------
+# CSV register export (added: luminaire register).
+# Back-office only (get_current_user) -> reached via /auth/login, NOT the field PWA.
+# Path is /export/luminaires.csv (not /assets/...) so it never collides with the
+# /assets/{id} route. Filters to streetlight luminaires; one row per non-deleted
+# capture; the 22 agreed columns. Date = capture timestamp (ISO-8601).
+# ---------------------------------------------------------------------------
+_EXPORT_HEADERS = [
+    "Luminaire Manufacturer", "Luminaire Model", "Luminaire Serial",
+    "Luminaire Year", "Luminaire Wattage",
+    "Controller Manufacturer", "Controller Model", "Controller IMEI",
+    "Date of Installation", "Work Order Number",
+    "Installer Type", "Installer Name", "Designation",
+    "Service Number", "Company", "Contractor Number",
+    "Region", "Road", "Suburb", "City", "Latitude", "Longitude",
+]
+
+
+@router.get("/export/luminaires.csv")
+def export_luminaires_csv(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    rows = (db.query(Asset)
+              .filter(Asset.deleted_at.is_(None),
+                      Asset.asset_type_code == "streetlight_luminaire")
+              .order_by(Asset.captured_at)
+              .all())
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(_EXPORT_HEADERS)
+    for a in rows:
+        name = " ".join(p for p in (a.captured_by_name, a.captured_by_surname) if p)
+        w.writerow([
+            a.manufacturer or "", a.model_no or "", a.serial_no or "",
+            a.manufacture_year if a.manufacture_year is not None else "",
+            a.wattage if a.wattage is not None else "",
+            a.controller_manufacturer or "", a.controller_model or "", a.imei or "",
+            _iso(a.captured_at) or "", a.work_order_no or "",
+            a.captured_by_kind or "", name, a.designation or "",
+            a.service_no or "", a.company_name or "", a.contractor_number or "",
+            a.region or "", a.road or "", a.suburb or "", a.city or "",
+            a.lat if a.lat is not None else "", a.lng if a.lng is not None else "",
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="nuevo_luminaire_register.csv"'},
+    )
