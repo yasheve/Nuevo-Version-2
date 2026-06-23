@@ -12,6 +12,7 @@ from ..config import settings
 from ..db import get_db
 from ..errors import err
 from ..models import Asset, Photo, FactoryUnit
+from ..register import build_register_csv, build_register_xlsx
 from ..security import (actor_sees_all, can_see_all, get_current_actor,
                         get_current_user, require_role)
 from ..storage import signed_get_url, delete_bytes
@@ -390,58 +391,46 @@ def batch(body: BatchIn, db: Session = Depends(get_db), actor=Depends(get_curren
 
 
 # ---------------------------------------------------------------------------
-# CSV register export (added: luminaire register).
-# Back-office only (get_current_user) -> reached via /auth/login, NOT the field PWA.
-# Path is /export/luminaires.csv (not /assets/...) so it never collides with the
-# /assets/{id} route. Filters to streetlight luminaires; one row per non-deleted
-# capture; the 22 agreed columns. Date = capture timestamp (ISO-8601).
+# Two register exports — CSV and XLSX — share ONE column spec (app/register.py)
+# so they can never drift. Same admin gate, same data. City column removed; EMP
+# (eThekwini) captures default Company to "eThekwini Municipality".
+# Back-office only (get_current_user, reached via /auth/login, NOT the field PWA);
+# further narrowed to the single admin employee_id below. Paths are /export/...
+# so they never collide with the /assets/{id} route.
 # ---------------------------------------------------------------------------
-_EXPORT_HEADERS = [
-    "Luminaire Manufacturer", "Luminaire Model", "Luminaire Serial",
-    "Luminaire Year", "Luminaire Wattage",
-    "Controller Manufacturer", "Controller Model", "Controller IMEI",
-    "Date of Installation", "Work Order Number",
-    "Installer Type", "Installer Name", "Designation",
-    "Service Number", "Company", "Contractor Number",
-    "Region", "Road", "Suburb", "City", "Latitude", "Longitude",
-]
-
-
-@router.get("/export/luminaires.csv")
-def export_luminaires_csv(db: Session = Depends(get_db),
-                          user=Depends(get_current_user)):
-    # Register download is restricted to the single municipal administrator
-    # (settings.EXPORT_ADMIN_EMPLOYEE_ID, default EMP-0001). get_current_user
-    # already rejects field tokens (no `sub`); this further narrows back-office
-    # access to that one account.
+def _require_register_admin(user):
     if user.employee_id != settings.EXPORT_ADMIN_EMPLOYEE_ID:
         raise err(403, "forbidden",
                   "Only the municipal administrator may download the register")
-    rows = (db.query(Asset)
+
+
+def _register_assets(db: Session):
+    return (db.query(Asset)
               .filter(Asset.deleted_at.is_(None),
                       Asset.asset_type_code == "streetlight_luminaire")
               .order_by(Asset.captured_at)
               .all())
 
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(_EXPORT_HEADERS)
-    for a in rows:
-        name = " ".join(p for p in (a.captured_by_name, a.captured_by_surname) if p)
-        w.writerow([
-            a.manufacturer or "", a.model_no or "", a.serial_no or "",
-            a.manufacture_year if a.manufacture_year is not None else "",
-            a.wattage if a.wattage is not None else "",
-            a.controller_manufacturer or "", a.controller_model or "", a.imei or "",
-            _iso(a.captured_at) or "", a.work_order_no or "",
-            a.captured_by_kind or "", name, a.designation or "",
-            a.service_no or "", a.company_name or "", a.contractor_number or "",
-            a.region or "", a.road or "", a.suburb or "", a.city or "",
-            a.lat if a.lat is not None else "", a.lng if a.lng is not None else "",
-        ])
-    buf.seek(0)
+
+@router.get("/export/luminaires.csv")
+def export_luminaires_csv(db: Session = Depends(get_db),
+                          user=Depends(get_current_user)):
+    _require_register_admin(user)
+    data = build_register_csv(_register_assets(db))
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        iter([data]),
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="nuevo_luminaire_register.csv"'},
+    )
+
+
+@router.get("/export/luminaires.xlsx")
+def export_luminaires_xlsx(db: Session = Depends(get_db),
+                           user=Depends(get_current_user)):
+    _require_register_admin(user)
+    data = build_register_xlsx(_register_assets(db))
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="nuevo_luminaire_register.xlsx"'},
     )
