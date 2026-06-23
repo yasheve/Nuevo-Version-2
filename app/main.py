@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import Base, SessionLocal, engine
 from .errors import APIError, api_error_handler
-from .routers import assets, audits, auth, health, ocr, reference, trace, uploads
+from .routers import assets, audits, auth, geocode, health, ocr, reference, trace, uploads
 from .seed import seed
 
 
@@ -51,6 +51,7 @@ app.include_router(auth.router, prefix=V1, tags=["auth"])
 app.include_router(reference.router, prefix=V1, tags=["reference"])
 app.include_router(uploads.router, prefix=V1, tags=["uploads"])
 app.include_router(ocr.router, prefix=V1, tags=["ocr"])
+app.include_router(geocode.router, prefix=V1, tags=["geocode"])
 app.include_router(assets.router, prefix=V1, tags=["assets"])
 app.include_router(trace.router, prefix=V1, tags=["trace"])
 app.include_router(audits.router, prefix=V1, tags=["audits"])
