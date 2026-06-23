@@ -39,6 +39,15 @@ class Settings:
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     OCR_MODEL: str = os.getenv("OCR_MODEL", "claude-sonnet-4-6")
 
+    # --- reverse geocoding (server-side; provider key NEVER leaves app) -
+    # Set GEOCODE_API_KEY to turn on address auto-fill from GPS on the capture
+    # screen (GET /v1/geocode). With no key the endpoint returns empty fields
+    # and the installer types road/suburb/city by hand (mirrors OCR fallback).
+    # Provider is swappable via env without touching the PWA, which only ever
+    # talks to /v1/geocode.
+    GEOCODE_API_KEY: str = os.getenv("GEOCODE_API_KEY", "")
+    GEOCODE_PROVIDER: str = os.getenv("GEOCODE_PROVIDER", "geoapify")
+
     # --- register export gate ------------------------------------------
     # Only the back-office user whose employee_id equals this may download the
     # full luminaire register CSV (GET /v1/export/luminaires.csv). Defaults to
