@@ -39,6 +39,13 @@ class Settings:
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     OCR_MODEL: str = os.getenv("OCR_MODEL", "claude-sonnet-4-6")
 
+    # --- register export gate ------------------------------------------
+    # Only the back-office user whose employee_id equals this may download the
+    # full luminaire register CSV (GET /v1/export/luminaires.csv). Defaults to
+    # the seeded municipal admin; override via env if that account ever changes
+    # (no code edit / redeploy of source needed).
+    EXPORT_ADMIN_EMPLOYEE_ID: str = os.getenv("EXPORT_ADMIN_EMPLOYEE_ID", "EMP-0001")
+
     # --- seeding --------------------------------------------------------
     SEED_ON_START: bool = _bool(os.getenv("SEED_ON_START"), True)
     SEED_DEMO_PASSWORD: str = os.getenv("SEED_DEMO_PASSWORD", "nuevo123")
