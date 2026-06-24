@@ -20,7 +20,7 @@ _TIMEOUT_S = 8
 
 
 def _empty() -> dict:
-    return {"road": "", "suburb": "", "city": "", "distance_m": None, "source": "none"}
+    return {"road": "", "suburb": "", "town": "", "municipality": "", "distance_m": None, "source": "none"}
 
 
 def _first(d: dict, *keys: str) -> str:
@@ -49,43 +49,6 @@ def _g_component(components: list, *types: str) -> str:
     return ""
 
 
-# Municipality -> preferred register city name. Google returns the LEGAL
-# municipality at administrative_area_level_2 (e.g. "eThekwini Metropolitan
-# Municipality"); the register wants the common city name. The match is a
-# case-insensitive substring on a distinctive token, so every name variant
-# ("eThekwini", "eThekwini Metropolitan Municipality") resolves the same.
-# ROLLOUT: add one (token, display) pair per province as the app expands.
-# Unmapped municipalities pass through unchanged, so a new area is never blank.
-_CITY_ALIASES = (
-    ("ethekwini", "Durban"),
-    # ("city of cape town", "Cape Town"),
-    # ("city of johannesburg", "Johannesburg"),
-    # ("city of tshwane", "Pretoria"),
-    # ("nelson mandela bay", "Gqeberha"),
-)
-
-
-def _norm_city(name: str) -> str:
-    low = (name or "").lower()
-    for token, display in _CITY_ALIASES:
-        if token in low:
-            return display
-    return name
-
-
-def _city(components: list) -> str:
-    """Register 'City' = the municipality, normalized to its common name.
-
-    Reads administrative_area_level_2 (the metro/district municipality) so every
-    suburb and town inside a metro reports ONE city — e.g. a pin in La Lucia /
-    uMhlanga reports the eThekwini metro (-> "Durban"), not the local town. Falls
-    back to locality -> postal_town only when the municipality level is absent
-    (some rural / informal points), so the field is never needlessly blank.
-    """
-    raw = _g_component(components, "administrative_area_level_2", "locality", "postal_town")
-    return _norm_city(raw)
-
-
 def _geoapify(lat: float, lng: float) -> dict:
     # Reverse geocode a single point. format=json -> flat `results[0]` keys;
     # lang=en keeps street/suburb/city names in English (eThekwini house
@@ -109,13 +72,14 @@ def _geoapify(lat: float, lng: float) -> dict:
         return _empty()
     r = results[0]
     dist = r.get("distance")
-    # [CHECK] Geoapify result keys below follow the documented schema; confirm
-    # the mapping against a live Durban response with a real key on the first
-    # real capture (informal / new areas may populate fewer of these).
+    # [CHECK] Geoapify is the FALLBACK provider; primary is Google. Keys below
+    # follow Geoapify's documented schema. town = the populated place; for SA,
+    # municipality maps from county/state_district (confirm on a live response).
     return {
-        "road":   _first(r, "street", "name"),
-        "suburb": _first(r, "suburb", "district", "neighbourhood", "quarter"),
-        "city":   _first(r, "city", "town", "village", "county"),
+        "road":         _first(r, "street", "name"),
+        "suburb":       _first(r, "suburb", "district", "neighbourhood", "quarter"),
+        "town":         _first(r, "city", "town", "village"),
+        "municipality": _first(r, "county", "state_district", "district"),
         "distance_m": (round(float(dist), 1) if isinstance(dist, (int, float)) else None),
         "source": "geoapify",
     }
@@ -155,7 +119,12 @@ def _google(lat: float, lng: float) -> dict:
     return {
         "road":   _g_component(comps, "route"),
         "suburb": _g_component(comps, "sublocality_level_1", "sublocality", "neighborhood"),
-        "city":   _city(comps),
+        # Option 2: every Google level kept distinct. town = the populated place
+        # (uMhlanga / Durban / Tongaat); municipality = the metro/district at
+        # administrative_area_level_2 (e.g. "eThekwini Metropolitan Municipality"),
+        # returned RAW — it is the portable national grouping key.
+        "town":         _g_component(comps, "locality", "postal_town"),
+        "municipality": _g_component(comps, "administrative_area_level_2"),
         "distance_m": None,
         "source": "google",
     }
