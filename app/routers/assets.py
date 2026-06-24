@@ -395,11 +395,12 @@ def batch(body: BatchIn, db: Session = Depends(get_db), actor=Depends(get_curren
 
 
 # ---------------------------------------------------------------------------
-# CSV register export (added: luminaire register).
-# Back-office only (get_current_user) -> reached via /auth/login, NOT the field PWA.
-# Path is /export/luminaires.csv (not /assets/...) so it never collides with the
-# /assets/{id} route. Filters to streetlight luminaires; one row per non-deleted
-# capture; the 22 agreed columns. Date = capture timestamp (ISO-8601).
+# Luminaire register export (CSV + XLSX).
+# Back-office only (get_current_user) -> reached via /auth/login, NOT the field PWA,
+# and further narrowed to the single municipal administrator. Filters to streetlight
+# luminaires; one row per non-deleted capture; the 23 agreed columns. Date = capture
+# timestamp. CSV and XLSX share ONE query + ONE row builder below, so they cannot
+# drift apart.
 # ---------------------------------------------------------------------------
 _EXPORT_HEADERS = [
     "Luminaire Manufacturer", "Luminaire Model", "Luminaire Serial",
@@ -408,8 +409,51 @@ _EXPORT_HEADERS = [
     "Date of Installation", "Work Order Number",
     "Installer Type", "Installer Name", "Designation",
     "Service Number", "Company", "Contractor Number",
-    "Region", "Road", "Suburb", "Town", "Municipality", "Latitude", "Longitude",
+    "Region", "Road Name", "Suburb", "Town", "Municipality", "Latitude", "Longitude",
 ]
+
+
+def _register_query(db: Session):
+    """Every non-deleted streetlight luminaire, oldest capture first."""
+    return (db.query(Asset)
+              .filter(Asset.deleted_at.is_(None),
+                      Asset.asset_type_code == "streetlight_luminaire")
+              .order_by(Asset.captured_at)
+              .all())
+
+
+def _register_native_row(a) -> list:
+    """One register row as NATIVE values (datetime / int / float / str / None),
+    in _EXPORT_HEADERS order. The single source for BOTH exports.
+
+    Export-time rules live here (applied at export, not in stored data, per spec):
+      - Company defaults to "eThekwini Municipality" for EMP captures (which carry
+        no company); EMC keeps its registered contractor company.
+      - Town falls back to the legacy `city` value for pre-Option-2 rows so the
+        column is never blank for historical captures.
+    """
+    name = " ".join(p for p in (a.captured_by_name, a.captured_by_surname) if p)
+    company = a.company_name or ("eThekwini Municipality"
+                                 if a.captured_by_kind == "EMP" else "")
+    return [
+        a.manufacturer, a.model_no, a.serial_no,
+        a.manufacture_year, a.wattage,
+        a.controller_manufacturer, a.controller_model, a.imei,
+        a.captured_at, a.work_order_no,
+        a.captured_by_kind, name, a.designation,
+        a.service_no, company, a.contractor_number,
+        a.region, a.road, a.suburb, (a.town or a.city), a.municipality,
+        a.lat, a.lng,
+    ]
+
+
+def _csv_cell(v):
+    """Stringify a native value for CSV (datetime -> ISO-8601, None -> "")."""
+    if v is None:
+        return ""
+    if isinstance(v, datetime):
+        return _iso(v) or ""
+    return v
 
 
 @router.get("/export/luminaires.csv")
@@ -422,32 +466,95 @@ def export_luminaires_csv(db: Session = Depends(get_db),
     if user.employee_id != settings.EXPORT_ADMIN_EMPLOYEE_ID:
         raise err(403, "forbidden",
                   "Only the municipal administrator may download the register")
-    rows = (db.query(Asset)
-              .filter(Asset.deleted_at.is_(None),
-                      Asset.asset_type_code == "streetlight_luminaire")
-              .order_by(Asset.captured_at)
-              .all())
+    rows = _register_query(db)
 
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(_EXPORT_HEADERS)
     for a in rows:
-        name = " ".join(p for p in (a.captured_by_name, a.captured_by_surname) if p)
-        w.writerow([
-            a.manufacturer or "", a.model_no or "", a.serial_no or "",
-            a.manufacture_year if a.manufacture_year is not None else "",
-            a.wattage if a.wattage is not None else "",
-            a.controller_manufacturer or "", a.controller_model or "", a.imei or "",
-            _iso(a.captured_at) or "", a.work_order_no or "",
-            a.captured_by_kind or "", name, a.designation or "",
-            a.service_no or "", a.company_name or "", a.contractor_number or "",
-            a.region or "", a.road or "", a.suburb or "",
-            (a.town or a.city) or "", a.municipality or "",
-            a.lat if a.lat is not None else "", a.lng if a.lng is not None else "",
-        ])
+        w.writerow([_csv_cell(v) for v in _register_native_row(a)])
     buf.seek(0)
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="nuevo_luminaire_register.csv"'},
+    )
+
+
+# XLSX register export — the agreed Excel house layout (navy header, typed cells,
+# frozen header, Excel Table "LuminaireRegister"). Same admin gate as the CSV.
+# openpyxl is imported lazily so the rest of the router never depends on it.
+_XLSX_INT_COLS = {4, 5}        # Luminaire Year, Luminaire Wattage
+_XLSX_DATE_COL = 9             # Date of Installation
+_XLSX_TEXT_COLS = {8}          # Controller IMEI (keep the full number as text)
+_XLSX_LATLNG_COLS = {22, 23}   # Latitude, Longitude
+_XLSX_WIDTHS = {1: 26, 2: 21.3, 3: 19.1, 4: 18.2, 5: 21, 6: 26.1, 7: 19.5,
+                8: 23.1, 9: 21.5, 10: 22.7, 11: 16.8, 12: 17.5, 13: 26.5,
+                14: 18.8, 15: 37.3, 16: 21.9, 17: 16.5, 18: 14.3, 19: 11.5,
+                21: 23.5, 22: 12.3, 23: 13.8}   # col 20 (Town) left at Excel default, matching the target
+
+
+@router.get("/export/luminaires.xlsx")
+def export_luminaires_xlsx(db: Session = Depends(get_db),
+                           user=Depends(get_current_user)):
+    if user.employee_id != settings.EXPORT_ADMIN_EMPLOYEE_ID:
+        raise err(403, "forbidden",
+                  "Only the municipal administrator may download the register")
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+
+    rows = _register_query(db)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "nuevo_luminaire_register_" + datetime.now(timezone.utc).strftime("%Y%m")
+
+    # Header row: navy fill, white bold, centred.
+    hdr_fill = PatternFill("solid", fgColor="1F4E78")
+    hdr_font = Font(bold=True, size=10, color="FFFFFF")
+    hdr_align = Alignment(horizontal="center", vertical="center")
+    for ci, h in enumerate(_EXPORT_HEADERS, start=1):
+        c = ws.cell(row=1, column=ci, value=h)
+        c.fill = hdr_fill
+        c.font = hdr_font
+        c.alignment = hdr_align
+
+    # Data rows: native typed cells + per-column number formats.
+    for ri, a in enumerate(rows, start=2):
+        for ci, v in enumerate(_register_native_row(a), start=1):
+            if isinstance(v, datetime) and v.tzinfo is not None:
+                v = v.replace(tzinfo=None)        # Excel cannot store tz-aware datetimes
+            cell = ws.cell(row=ri, column=ci, value=v)
+            if ci in _XLSX_INT_COLS:
+                cell.number_format = "0"
+            elif ci == _XLSX_DATE_COL:
+                cell.number_format = "yyyy\\-mm\\-dd\\ hh:mm"
+            elif ci in _XLSX_LATLNG_COLS:
+                cell.number_format = "0.000000"
+            elif ci in _XLSX_TEXT_COLS:
+                cell.number_format = "@"
+
+    ws.freeze_panes = "A2"
+    for ci, wdt in _XLSX_WIDTHS.items():
+        ws.column_dimensions[get_column_letter(ci)].width = wdt
+
+    # Lay the data out as an Excel Table (banded rows, filterable).
+    last_row = len(rows) + 1
+    ref = "A1:%s%d" % (get_column_letter(len(_EXPORT_HEADERS)), last_row)
+    table = Table(displayName="LuminaireRegister", ref=ref)
+    table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2",
+                                          showRowStripes=True, showColumnStripes=False,
+                                          showFirstColumn=False, showLastColumn=False)
+    ws.add_table(table)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="nuevo_luminaire_register.xlsx"'},
     )
