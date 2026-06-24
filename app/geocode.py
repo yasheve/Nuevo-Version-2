@@ -1,4 +1,4 @@
-"""Server-side reverse geocoding (Geoapify by default).
+"""Server-side reverse geocoding (Geoapify or Google; select via GEOCODE_PROVIDER).
 
 The provider key lives here, never in the app. This always returns HTTP 200:
 on any problem (no key configured, provider unreachable, unparseable output)
@@ -29,6 +29,23 @@ def _first(d: dict, *keys: str) -> str:
         v = d.get(k)
         if isinstance(v, str) and v.strip():
             return v.strip()
+    return ""
+
+
+def _g_component(components: list, *types: str) -> str:
+    """First Google address-component long_name matching one of `types`.
+
+    Google returns `address_components` as a flat list, each tagged with one or
+    more `types`. We scan in the caller's PRIORITY order: for each desired type
+    in turn, return the long_name of the first component carrying it. This lets
+    the caller control precedence (e.g. sublocality_level_1 before neighborhood).
+    """
+    for t in types:
+        for comp in components:
+            if t in (comp.get("types") or []):
+                name = comp.get("long_name")
+                if isinstance(name, str) and name.strip():
+                    return name.strip()
     return ""
 
 
@@ -67,6 +84,46 @@ def _geoapify(lat: float, lng: float) -> dict:
     }
 
 
+def _google(lat: float, lng: float) -> dict:
+    # Google Geocoding API (v3 web service). latlng MUST be "lat,lng" with no
+    # space between the values; urlencode percent-encodes the comma, which the
+    # API accepts. language=en keeps names in English (eThekwini house language).
+    # Google returns no per-result distance from the query point, so distance_m
+    # is null here (the response plus_code is guaranteed within 10 m of the point
+    # but is not surfaced).
+    qs = urllib.parse.urlencode({
+        "latlng": "%s,%s" % (lat, lng),
+        "key": settings.GEOCODE_API_KEY,
+        "language": "en",
+    })
+    url = "https://maps.googleapis.com/maps/api/geocode/json?" + qs
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+
+    # `status` is the authoritative success flag. Anything other than OK
+    # (ZERO_RESULTS, OVER_QUERY_LIMIT, REQUEST_DENIED, INVALID_REQUEST,
+    # UNKNOWN_ERROR) -> empty fields, so the capture form falls back to manual
+    # entry (mirrors the no-key / unreachable paths).
+    if payload.get("status") != "OK":
+        return _empty()
+    results = payload.get("results") or []
+    if not results:
+        return _empty()
+    comps = results[0].get("address_components") or []
+    # [CHECK] SA type mapping below follows Google's documented address-component
+    # types; confirm against a live Durban response on the first real capture
+    # (informal / new areas may populate fewer of these). Note: Google spells it
+    # "neighborhood" (US), unlike Geoapify's "neighbourhood".
+    return {
+        "road":   _g_component(comps, "route"),
+        "suburb": _g_component(comps, "sublocality_level_1", "sublocality", "neighborhood"),
+        "city":   _g_component(comps, "locality", "postal_town", "administrative_area_level_2"),
+        "distance_m": None,
+        "source": "google",
+    }
+
+
 def reverse_geocode(lat: float, lng: float) -> dict:
     """lat/lng -> {road, suburb, city, distance_m, source}. Never raises."""
     if not settings.GEOCODE_API_KEY:
@@ -75,6 +132,8 @@ def reverse_geocode(lat: float, lng: float) -> dict:
         provider = (settings.GEOCODE_PROVIDER or "geoapify").strip().lower()
         if provider == "geoapify":
             return _geoapify(lat, lng)
+        if provider == "google":
+            return _google(lat, lng)
         return _empty()
     except Exception:
         return _empty()
