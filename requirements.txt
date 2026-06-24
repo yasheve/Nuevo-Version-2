@@ -14,5 +14,5 @@ boto3>=1.34
 # Live nameplate OCR (set ANTHROPIC_API_KEY to enable; harmless if unset):
 anthropic>=0.39
 
-# Excel (.xlsx) register export — formatted workbook generation:
+# Excel (.xlsx) register export (app/routers/assets.py -> /export/luminaires.xlsx):
 openpyxl>=3.1
