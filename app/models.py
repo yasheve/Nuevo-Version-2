@@ -109,7 +109,9 @@ class Asset(Base):
     accuracy_m = Column(Float)
     road = Column(String)
     suburb = Column(String)
-    city = Column(String)
+    city = Column(String)              # legacy: pre-Option-2 captures only; new captures use town/municipality
+    town = Column(String)             # populated place, e.g. uMhlanga (Google locality) [added: location levels]
+    municipality = Column(String)     # metro/district, e.g. eThekwini Metropolitan Municipality (admin_area_level_2) [added]
 
     notes = Column(Text)
     damage_flag = Column(Boolean, default=False)
