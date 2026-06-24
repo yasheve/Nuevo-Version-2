@@ -49,6 +49,43 @@ def _g_component(components: list, *types: str) -> str:
     return ""
 
 
+# Municipality -> preferred register city name. Google returns the LEGAL
+# municipality at administrative_area_level_2 (e.g. "eThekwini Metropolitan
+# Municipality"); the register wants the common city name. The match is a
+# case-insensitive substring on a distinctive token, so every name variant
+# ("eThekwini", "eThekwini Metropolitan Municipality") resolves the same.
+# ROLLOUT: add one (token, display) pair per province as the app expands.
+# Unmapped municipalities pass through unchanged, so a new area is never blank.
+_CITY_ALIASES = (
+    ("ethekwini", "Durban"),
+    # ("city of cape town", "Cape Town"),
+    # ("city of johannesburg", "Johannesburg"),
+    # ("city of tshwane", "Pretoria"),
+    # ("nelson mandela bay", "Gqeberha"),
+)
+
+
+def _norm_city(name: str) -> str:
+    low = (name or "").lower()
+    for token, display in _CITY_ALIASES:
+        if token in low:
+            return display
+    return name
+
+
+def _city(components: list) -> str:
+    """Register 'City' = the municipality, normalized to its common name.
+
+    Reads administrative_area_level_2 (the metro/district municipality) so every
+    suburb and town inside a metro reports ONE city — e.g. a pin in La Lucia /
+    uMhlanga reports the eThekwini metro (-> "Durban"), not the local town. Falls
+    back to locality -> postal_town only when the municipality level is absent
+    (some rural / informal points), so the field is never needlessly blank.
+    """
+    raw = _g_component(components, "administrative_area_level_2", "locality", "postal_town")
+    return _norm_city(raw)
+
+
 def _geoapify(lat: float, lng: float) -> dict:
     # Reverse geocode a single point. format=json -> flat `results[0]` keys;
     # lang=en keeps street/suburb/city names in English (eThekwini house
@@ -118,7 +155,7 @@ def _google(lat: float, lng: float) -> dict:
     return {
         "road":   _g_component(comps, "route"),
         "suburb": _g_component(comps, "sublocality_level_1", "sublocality", "neighborhood"),
-        "city":   _g_component(comps, "locality", "postal_town", "administrative_area_level_2"),
+        "city":   _city(comps),
         "distance_m": None,
         "source": "google",
     }
