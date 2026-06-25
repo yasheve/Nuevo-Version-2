@@ -112,6 +112,7 @@ class Asset(Base):
     city = Column(String)              # legacy: pre-Option-2 captures only; new captures use town/municipality
     town = Column(String)             # populated place, e.g. uMhlanga (Google locality) [added: location levels]
     municipality = Column(String)     # metro/district, e.g. eThekwini Metropolitan Municipality (admin_area_level_2) [added]
+    province = Column(String)         # province, e.g. KwaZulu-Natal (admin_area_level_1) [added: location levels]
 
     notes = Column(Text)
     damage_flag = Column(Boolean, default=False)
