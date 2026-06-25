@@ -229,6 +229,13 @@ def _detail(asset: Asset):
         "address": {"road": asset.road, "suburb": asset.suburb,
                     "town": asset.town, "municipality": asset.municipality,
                     "city": asset.city},
+        "region": asset.region, "model_no": asset.model_no,
+        "controller_manufacturer": asset.controller_manufacturer,
+        "controller_model": asset.controller_model, "work_order_no": asset.work_order_no,
+        "captured_by_kind": asset.captured_by_kind,
+        "captured_by_name": asset.captured_by_name, "captured_by_surname": asset.captured_by_surname,
+        "service_no": asset.service_no, "designation": asset.designation,
+        "company_name": asset.company_name, "contractor_number": asset.contractor_number,
         "captured_at": _iso(asset.captured_at), "created_at": _iso(asset.created_at),
         "status": asset.status, "photos": _photos_signed(asset),
     }
@@ -290,6 +297,53 @@ def _load_owned(db: Session, actor, asset_id: str) -> Asset:
     if not actor_sees_all(actor) and asset.installer_id != getattr(actor, "id", None):
         raise err(403, "forbidden", "Not your record")
     return asset
+
+
+def _map_point(a):
+    """One GeoJSON Feature for the admin map. Properties are DETAIL-shaped so the
+    PWA's mapAsset() adapter consumes them with no change. Same per-row rules as
+    the XLSX register (EMP company default, town->city fallback) so the map and
+    the export can never show different values for the same luminaire."""
+    company = a.company_name or ("eThekwini Municipality"
+                                 if a.captured_by_kind == "EMP" else "")
+    return {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [a.lng, a.lat]},
+        "properties": {
+            "id": a.id, "serial_no": a.serial_no,
+            "manufacturer": a.manufacturer, "model_no": a.model_no,
+            "manufacture_year": a.manufacture_year, "wattage": a.wattage,
+            "controller_manufacturer": a.controller_manufacturer,
+            "controller_model": a.controller_model, "imei": a.imei,
+            "captured_at": _iso(a.captured_at), "work_order_no": a.work_order_no,
+            "captured_by_kind": a.captured_by_kind,
+            "captured_by_name": a.captured_by_name,
+            "captured_by_surname": a.captured_by_surname,
+            "designation": a.designation, "service_no": a.service_no,
+            "company_name": company, "contractor_number": a.contractor_number,
+            "region": a.region,
+            "location": {"lat": a.lat, "lng": a.lng},
+            "address": {"road": a.road, "suburb": a.suburb,
+                        "town": (a.town or a.city), "municipality": a.municipality},
+        },
+    }
+
+
+# IMPORTANT: registered BEFORE /assets/{asset_id} so "geojson" is never captured
+# as an {asset_id} path param.
+@router.get("/assets/geojson")
+def assets_geojson(db: Session = Depends(get_db),
+                   user=Depends(get_current_user)):
+    """Admin-only coordinate feed for the luminaire map. Reuses _register_query()
+    (non-deleted streetlight luminaires) so the map's rows are identical to the
+    XLSX register. Gated to the single municipal administrator, exactly like the
+    /export/* routes (settings.EXPORT_ADMIN_EMPLOYEE_ID, default EMP-0001)."""
+    if user.employee_id != settings.EXPORT_ADMIN_EMPLOYEE_ID:
+        raise err(403, "forbidden",
+                  "Only the municipal administrator may view the map")
+    feats = [_map_point(a) for a in _register_query(db)
+             if a.lat is not None and a.lng is not None]
+    return {"type": "FeatureCollection", "features": feats}
 
 
 @router.get("/assets/{asset_id}")
