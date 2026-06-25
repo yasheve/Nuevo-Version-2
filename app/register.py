@@ -5,8 +5,9 @@ apart. Callers pass an iterable of Asset-like objects (anything exposing the
 read attributes below); this module imports nothing from the rest of the app
 (no DB, no storage, no settings) so it stays import-light and unit-testable.
 
-Differences vs the original 22-column CSV (per client instruction):
-  * `City` column removed (21 columns now).
+Column set (23 columns) matches the agreed register layout:
+  * No standalone `City` column; `Town` falls back to the legacy `city` value for
+    pre-redesign rows so it is never blank for historical captures.
   * `Company` defaults to "eThekwini Municipality" for EMP (eThekwini) captures,
     which otherwise carry no company; EMC captures keep their contractor company.
 """
@@ -58,8 +59,10 @@ REGISTER_SPEC = [
     ("Company",                 "text",     _company),
     ("Contractor Number",       "text",     lambda a: a.contractor_number),
     ("Region",                  "text",     lambda a: a.region),
-    ("Road",                    "text",     lambda a: a.road),
+    ("Road Name",               "text",     lambda a: a.road),
     ("Suburb",                  "text",     lambda a: a.suburb),
+    ("Town",                    "text",     lambda a: a.town or a.city),
+    ("Municipality",            "text",     lambda a: a.municipality),
     ("Latitude",                "float",    lambda a: a.lat),
     ("Longitude",               "float",    lambda a: a.lng),
 ]
@@ -74,7 +77,8 @@ _COL_WIDTHS = {
     "Controller Model": 19.5, "Controller IMEI": 23.2, "Date of Installation": 21.5,
     "Work Order Number": 22.7, "Installer Type": 16.8, "Installer Name": 17.5,
     "Designation": 22.2, "Service Number": 18.9, "Company": 37.2, "Contractor Number": 21.9,
-    "Region": 16.5, "Road": 14.3, "Suburb": 11.5, "Latitude": 12.2, "Longitude": 13.8,
+    "Region": 16.5, "Road Name": 14.3, "Suburb": 11.5, "Town": 18.0,
+    "Municipality": 23.5, "Latitude": 12.2, "Longitude": 13.8,
 }
 
 # Number formats per kind (text -> General). Matches the reference workbook.
