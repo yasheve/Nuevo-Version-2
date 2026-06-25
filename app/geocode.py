@@ -20,7 +20,7 @@ _TIMEOUT_S = 8
 
 
 def _empty() -> dict:
-    return {"road": "", "suburb": "", "town": "", "municipality": "", "distance_m": None, "source": "none"}
+    return {"road": "", "suburb": "", "town": "", "municipality": "", "province": "", "distance_m": None, "source": "none"}
 
 
 def _first(d: dict, *keys: str) -> str:
@@ -80,6 +80,7 @@ def _geoapify(lat: float, lng: float) -> dict:
         "suburb":       _first(r, "suburb", "district", "neighbourhood", "quarter"),
         "town":         _first(r, "city", "town", "village"),
         "municipality": _first(r, "county", "state_district", "district"),
+        "province":     _first(r, "state", "state_district"),
         "distance_m": (round(float(dist), 1) if isinstance(dist, (int, float)) else None),
         "source": "geoapify",
     }
@@ -125,6 +126,9 @@ def _google(lat: float, lng: float) -> dict:
         # returned RAW — it is the portable national grouping key.
         "town":         _g_component(comps, "locality", "postal_town"),
         "municipality": _g_component(comps, "administrative_area_level_2"),
+        # Province: administrative_area_level_1 (e.g. "KwaZulu-Natal"). The most
+        # reliably-returned admin level, unlike level_2 which is often absent.
+        "province":     _g_component(comps, "administrative_area_level_1"),
         "distance_m": None,
         "source": "google",
     }
