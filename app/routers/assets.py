@@ -34,6 +34,7 @@ class AddressIn(BaseModel):
     city: str | None = None              # legacy; tolerated but no longer sent by the PWA
     town: str | None = None              # [added: location levels]
     municipality: str | None = None      # [added: location levels]
+    province: str | None = None          # [added: location levels] admin_area_level_1
 
 
 class PhotoIn(BaseModel):
@@ -182,7 +183,7 @@ def _build_asset(db: Session, actor, body: AssetIn) -> Asset:
         region=body.region,
         lat=loc.lat, lng=loc.lng, accuracy_m=loc.accuracy_m,
         road=addr.road, suburb=addr.suburb, city=addr.city,
-        town=addr.town, municipality=addr.municipality,
+        town=addr.town, municipality=addr.municipality, province=addr.province,
         notes=body.notes,
         damage_flag=bool(body.damage_flag) if body.damage_flag is not None else False,
         corrosion_flag=bool(body.corrosion_flag) if body.corrosion_flag is not None else False,
@@ -228,7 +229,7 @@ def _detail(asset: Asset):
         "location": {"lat": asset.lat, "lng": asset.lng, "accuracy_m": asset.accuracy_m},
         "address": {"road": asset.road, "suburb": asset.suburb,
                     "town": asset.town, "municipality": asset.municipality,
-                    "city": asset.city},
+                    "province": asset.province, "city": asset.city},
         "region": asset.region, "model_no": asset.model_no,
         "controller_manufacturer": asset.controller_manufacturer,
         "controller_model": asset.controller_model, "work_order_no": asset.work_order_no,
@@ -324,7 +325,8 @@ def _map_point(a):
             "region": a.region,
             "location": {"lat": a.lat, "lng": a.lng},
             "address": {"road": a.road, "suburb": a.suburb,
-                        "town": (a.town or a.city), "municipality": a.municipality},
+                        "town": (a.town or a.city), "municipality": a.municipality,
+                        "province": a.province},
         },
     }
 
